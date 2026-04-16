@@ -13,20 +13,22 @@ It helps you set up audit pipelines with AI agents, pattern checks, memory, Pyth
 
 ## Table of Contents
 
-- [What Is VulnFlow](#what-is-vulnflow)
-- [Why VulnFlow](#why-vulnflow)
-- [Screenshots](#screenshots)
-- [Quick Start](#quick-start)
-- [How to Set Up a Project for Audit](#how-to-set-up-a-project-for-audit)
-- [What You Need](#what-you-need)
-- [Project Structure](#project-structure)
-- [Configuration](#configuration)
-- [Using the UI](#using-the-ui)
-- [External Tools](#external-tools)
-- [Troubleshooting](#troubleshooting)
-- [More Documentation](#more-documentation)
-- [CLI](#cli)
-- [Contact](#contact)
+- [VulnFlow](#vulnflow)
+  - [Table of Contents](#table-of-contents)
+  - [What Is VulnFlow](#what-is-vulnflow)
+  - [Why VulnFlow](#why-vulnflow)
+  - [Screenshots](#screenshots)
+  - [Quick Start](#quick-start)
+  - [How to Set Up a Project for Audit](#how-to-set-up-a-project-for-audit)
+  - [What You Need](#what-you-need)
+  - [Project Structure](#project-structure)
+  - [Configuration](#configuration)
+  - [Using the UI](#using-the-ui)
+  - [External Tools](#external-tools)
+  - [Troubleshooting](#troubleshooting)
+  - [More Documentation](#more-documentation)
+  - [CLI](#cli)
+  - [Contact](#contact)
 
 ---
 
@@ -132,8 +134,14 @@ It is useful when you want a repeatable audit process instead of running every s
 
 5. Start VulnFlow:
 
+  ```powershell
+  vulnflow start
+  ```
+  
+  or
+
    ```bash
-   python vulnflow.py start
+   ./vulnflow.py start
    ```
 
 6. Open the local builder URL shown in the terminal.
