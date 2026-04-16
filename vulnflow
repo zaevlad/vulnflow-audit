@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+COMMAND="${1:-}"
+
+case "${OSTYPE:-}" in
+    msys*|cygwin*|win32*)
+        VENV_PYTHON="$SCRIPT_DIR/.venv/Scripts/python.exe"
+        SYSTEM_PYTHON="python"
+        ;;
+    *)
+        VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python"
+        SYSTEM_PYTHON="python3"
+        ;;
+esac
+
+if [[ -f "$VENV_PYTHON" ]]; then
+    exec "$VENV_PYTHON" "$SCRIPT_DIR/vulnflow.py" "$@"
+fi
+
+if [[ "$COMMAND" == "prepare" ]]; then
+    exec "$SYSTEM_PYTHON" "$SCRIPT_DIR/vulnflow.py" "$@"
+fi
+
+printf 'Project virtual environment was not found. Run "vulnflow prepare" first.\n' >&2
+exit 1

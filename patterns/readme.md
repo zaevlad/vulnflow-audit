@@ -1,0 +1,3 @@
+The `patterns/` area follows the practice of representing attack vectors as machine-readable definitions. While reviewing public smart-contract audit resources, the approach was adapted from the [Pashov Audit Group — skills](https://github.com/pashov/skills) repository; the [attack-vectors](https://github.com/pashov/skills/blob/main/solidity-auditor/references/attack-vectors/attack-vectors.md) reference is a useful starting point in particular.
+
+YAML patterns plug into the static-analysis stage of a VulnFlow pipeline: that reduces hand-built checklists and speeds up an initial code pass through a single catalog of vulnerability classes.

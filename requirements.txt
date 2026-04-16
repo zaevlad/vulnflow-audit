@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pyyaml
+solidity-parser
+httpx
+sqlite-vec
+sentence-transformers
+torch

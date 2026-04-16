@@ -1,0 +1,115 @@
+models:
+#  chatgpt:
+#    enabled: true
+#    api_key: ""
+#    # api_key_env: OPENAI_API_KEY
+#    # base_url: https://api.openai.com/v1
+#    # base_url_env: CHATGPT_BASE_URL
+#    models:
+#      - gpt-4.1
+#      - gpt-4o-mini
+#  claude:
+#    enabled: true
+#    api_key: ""
+#    # api_key_env: ANTHROPIC_API_KEY
+#    # base_url: https://api.anthropic.com/v1
+#    # base_url_env: CLAUDE_BASE_URL
+#    models:
+#      - claude-3-7-sonnet
+#      - claude-3-5-haiku
+  openrouter:
+    enabled: true
+    api_key: ""
+    # api_key_env: OPENROUTER_API_KEY
+    # base_url: https://openrouter.ai/api/v1
+    # base_url_env: OPENROUTER_BASE_URL
+    supports_response_format: true
+    models:
+      - openai/gpt-oss-120b
+#  ollama:
+#    enabled: true
+#    models:
+#      - qwen2.5-coder:14b
+#      - llama3.1:8b
+  lmstudio:
+    enabled: true
+    supports_response_format: false
+    models:
+      - gemma-4-26B-A4B-it-GGUF
+#  llama_cpp:
+#    enabled: true
+#    models:
+#      - qwen2.5-coder-7b-instruct-q4_k_m.gguf
+
+
+# --------------------------------------------------------------------------------------
+
+# HornetMCP REST API: https://hornetmcp.com/docs — put your Dashboard key in api_key.
+
+# Invite key for HornetMCP is vulnflow 
+
+# --------------------------------------------------------------------------------------
+
+tools:
+  - name: hornetmcp
+    description: >-
+      Semantic search in HornetMCP vulnerability DB (RAG over ~23k Solidity issues).
+      Same quota as MCP; rate limit 10 req/min per IP.
+    base_url: https://hornetmcp.com/api/v1
+    auth_type: api_key_header
+    api_key_header: X-API-Key
+    api_key: ""
+    endpoints:
+      - name: search
+        path: vulnerabilities/search
+        method: POST
+        description: >-
+          Semantic search for similar vulnerabilities. Query length 3–1000 characters: function context,
+          Solidity snippet, protocol type, desired risk class (see documentation for guidance).
+        parameters:
+          - name: query
+            type: string
+            required: true
+            description: >-
+              Text query — code, contract behavior description, or technical terms
+              (quality depends heavily on detail and search intent).
+
+# -------------------------------------------------------------------------------------------------------------------------------------
+
+# Cyfrin Solodit Findings API: https://cyfrin.notion.site/Cyfrin-Solodit-Findings-API-Specification-299f46a1865c80bcaaf0d8672fece2d6
+
+# -------------------------------------------------------------------------------------------------------------------------------------
+
+  - name: solodit
+    description: >-
+      Solodit — search and filter audit findings (Code4rena, Sherlock, Cyfrin, etc.).
+      Limit 20 requests / 60 s; default pageSize 50, max 100.
+    base_url: https://solodit.cyfrin.io/api/v1/solodit
+    auth_type: api_key_header
+    api_key_header: X-Cyfrin-API-Key
+    api_key: ""
+    endpoints:
+      - name: findings
+        path: findings
+        method: POST
+        description: >-
+          POST /findings — returns findings + metadata + rateLimit. Field filters is optional;
+          inside: keywords, impact (HIGH|MEDIUM|LOW|GAS), firms/tags/protocolCategory/forked/languages
+          (arrays of {value, label?}), protocol, user, minFinders, maxFinders, reported
+          ({value: 30|60|90|after|alltime, label?}), reportedAfter (ISO date when reported.value=after),
+          qualityScore, rarityScore (0–5), sortField (Recency|Quality|Rarity), sortDirection (Desc|Asc).
+          Filter value reference — Cyfrin page «Filter Options Reference».
+        parameters:
+          - name: page
+            type: integer
+            required: false
+            description: Page number (starts at 1, default 1).
+          - name: pageSize
+            type: integer
+            required: false
+            description: Page size (1–100, default 50).
+          - name: filters
+            type: object
+            required: false
+            description: >-
+              Filter object as in the API spec; can be left empty {} for paginated results.
