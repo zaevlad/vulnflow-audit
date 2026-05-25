@@ -6,3 +6,6 @@ httpx
 sqlite-vec
 sentence-transformers
 torch
+python-multipart
+pymupdf
+pillow

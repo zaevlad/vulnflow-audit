@@ -7,9 +7,15 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "highlight.js": "^11.11.1",
+    "highlightjs-solidity": "^2.0.6",
+    "monaco-editor": "^0.52.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "reactflow": "^11.11.4"
+    "react-markdown": "^10.1.0",
+    "reactflow": "^11.11.4",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

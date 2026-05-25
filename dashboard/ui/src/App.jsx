@@ -1,4 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import MonacoPane from "./components/editor/MonacoPane.jsx";
+import { ChatPanel } from "./components/chat/ChatPanel.jsx";
+import { AuditLogDrawer } from "./components/chat/AuditLogDrawer.jsx";
+import { CanvasUndoDrawer } from "./components/chat/CanvasUndoDrawer.jsx";
+import { makeCanvasDispatcher } from "./components/chat/canvasDispatcher.js";
 import ReactFlow, {
   Background,
   Controls,
@@ -59,6 +64,24 @@ const DEFAULT_DOCS_STATUS = {
   chunk_overlap: 150,
   processed_at: "",
 };
+
+const CHAT_PANEL_WIDTH_KEY = "vulnflow-chat-panel-width";
+const CHAT_PANEL_WIDTH_DEFAULT = 400;
+const CHAT_PANEL_WIDTH_MIN = 280;
+const CHAT_PANEL_WIDTH_MAX = 720;
+
+function readChatPanelWidth() {
+  try {
+    const raw = window.localStorage.getItem(CHAT_PANEL_WIDTH_KEY);
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) {
+      return Math.min(CHAT_PANEL_WIDTH_MAX, Math.max(CHAT_PANEL_WIDTH_MIN, Math.round(parsed)));
+    }
+  } catch {
+    /* ignore */
+  }
+  return CHAT_PANEL_WIDTH_DEFAULT;
+}
 
 async function api(url, options = {}) {
   const response = await fetch(url, {
@@ -1522,6 +1545,7 @@ export default function App() {
   const [docsStatus, setDocsStatus] = useState(DEFAULT_DOCS_STATUS);
   const [system, setSystem] = useState({ foundry: false, medusa: false, configPath: "" });
   const [fileTree, setFileTree] = useState(null);
+  const [workspaceFileTree, setWorkspaceFileTree] = useState(null);
   const [excludedPaths, setExcludedPaths] = useState([]);
   const [pipelineName, setPipelineName] = useState("custom-audit-flow");
   const [pipelines, setPipelines] = useState([]);
@@ -1529,6 +1553,7 @@ export default function App() {
   const [nodes, setNodes] = useState([]);
   const [edges, setEdges] = useState([]);
   const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
+  const [canvasRevision, setCanvasRevision] = useState(0);
   const [auditMode, setAuditMode] = useState(DEFAULT_AUDIT_MODE);
   const [status, setStatus] = useState("Choose an audit folder (code to scan); builder resources load from the workspace.");
   const [builderTab, setBuilderTab] = useState("settings");
@@ -1540,6 +1565,7 @@ export default function App() {
   const [agentEstimates, setAgentEstimates] = useState({});
   const [estimateRefreshKey, setEstimateRefreshKey] = useState(0);
   const [sectionRefreshState, setSectionRefreshState] = useState({ providers: false, resources: false, docs: false });
+  const [chatPanelWidth, setChatPanelWidth] = useState(readChatPanelWidth);
 
   const [auditRunId, setAuditRunId] = useState(null);
   const [auditRunStatus, setAuditRunStatus] = useState(null);
@@ -1566,6 +1592,160 @@ export default function App() {
 
   const updateNodes = useCallback((transform) => setNodes((current) => transform(current)), []);
   const refreshAgentEstimates = useCallback(() => setEstimateRefreshKey((current) => current + 1), []);
+
+  // canvasRevision: monotonic counter advanced on every node/edge mutation —
+  // used by the chat backend to reconcile agent-emitted canvas actions
+  // against the current graph state.
+  useEffect(() => { setCanvasRevision((current) => current + 1); }, [nodes, edges]);
+  const bumpCanvasRevision = useCallback(() => setCanvasRevision((current) => current + 1), []);
+
+  // Mutation provenance: set by canvasDispatcher BEFORE it invokes
+  // setNodes/setEdges, then cleared by the audit-log effect. Keeps
+  // agent-driven mutations from being re-logged as "manual" by the
+  // debounced batcher below.
+  const agentMutationInFlightRef = useRef(false);
+  const auditStateRef = useRef({
+    initialized: false,
+    lastSnapshot: { nodes: [], edges: [] },
+    lastLoggedRevision: 0,
+    pendingTimer: null,
+  });
+  const [auditDrawerOpen, setAuditDrawerOpen] = useState(false);
+  const [undoDrawerOpen, setUndoDrawerOpen] = useState(false);
+  const [auditRefreshTick, setAuditRefreshTick] = useState(0);
+  // Imperative open trigger consumed by MonacoPane: bumps `key` so the
+  // same {path, line} pair can re-fire (e.g. user clicks the same
+  // citation twice). MonacoPane reacts via useEffect.
+  const [pendingEditorOpen, setPendingEditorOpen] = useState(null);
+
+  // Flat workspace-relative → absolute path map for chat citation
+  // validation. Built once from workspaceFileTree.
+  const workspacePathMap = useMemo(() => {
+    const map = new Map();
+    function walk(node) {
+      if (!node) return;
+      if (node.kind === "file" && node.path) {
+        const abs = node.path.replace(/\\/g, "/");
+        const root = (workspacePath || "").replace(/\\/g, "/").replace(/\/$/, "");
+        let rel = abs;
+        if (root && abs.startsWith(root + "/")) {
+          rel = abs.slice(root.length + 1);
+        } else if (root && abs === root) {
+          rel = "";
+        }
+        if (rel) map.set(rel, node.path);
+      }
+      if (Array.isArray(node.children)) node.children.forEach(walk);
+    }
+    walk(workspaceFileTree);
+    return map;
+  }, [workspaceFileTree, workspacePath]);
+
+  const workspacePathSet = useMemo(
+    () => new Set(workspacePathMap.keys()),
+    [workspacePathMap],
+  );
+
+  const handleOpenInEditor = useCallback((path, line) => {
+    if (!path) return;
+    const normalized = String(path).replace(/\\/g, "/");
+    const abs = workspacePathMap.get(normalized) || normalized;
+    setBuilderTab("editor");
+    setPendingEditorOpen({ path: abs, line: Number(line) || null, key: Date.now() });
+  }, [workspacePathMap]);
+
+  const canvasDispatcher = useMemo(
+    () => makeCanvasDispatcher({
+      setNodes: (updater) => {
+        agentMutationInFlightRef.current = true;
+        setNodes(updater);
+      },
+      setEdges: (updater) => {
+        agentMutationInFlightRef.current = true;
+        setEdges(updater);
+      },
+      setViewport: (next) => {
+        agentMutationInFlightRef.current = true;
+        setViewport(next);
+      },
+    }),
+    [],
+  );
+
+  // Undo dispatcher uses *raw* setters so the resulting state-change
+  // flows through the manual_batch debounce — keeping an immutable
+  // record of the undo itself in canvas_audit_log.
+  const undoCanvasDispatcher = useMemo(
+    () => makeCanvasDispatcher({ setNodes, setEdges, setViewport }),
+    [],
+  );
+
+  // Snapshot serializer for the manual-batch audit row. Captures only the
+  // fields the backend / undo flow actually needs — avoids logging
+  // selection state or measured layout sizes.
+  const snapshotNodesEdges = useCallback(() => ({
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      type: n.type,
+      position: n.position,
+      data: n.data,
+      parentId: n.parentId || null,
+    })),
+    edges: edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle || null,
+      targetHandle: e.targetHandle || null,
+      data: e.data || {},
+    })),
+  }), [nodes, edges]);
+
+  // Debounced manual-batch push to /api/canvas/audit.
+  useEffect(() => {
+    const state = auditStateRef.current;
+    if (!state.initialized) {
+      state.initialized = true;
+      state.lastSnapshot = snapshotNodesEdges();
+      state.lastLoggedRevision = canvasRevision;
+      return;
+    }
+    if (agentMutationInFlightRef.current) {
+      // Agent-driven mutation; the backend already wrote an audit row.
+      agentMutationInFlightRef.current = false;
+      state.lastSnapshot = snapshotNodesEdges();
+      state.lastLoggedRevision = canvasRevision;
+      setAuditRefreshTick((t) => t + 1);
+      return;
+    }
+    if (state.pendingTimer) clearTimeout(state.pendingTimer);
+    state.pendingTimer = setTimeout(async () => {
+      const before = state.lastSnapshot;
+      const after = snapshotNodesEdges();
+      if (JSON.stringify(before) === JSON.stringify(after)) return;
+      try {
+        await fetch("/api/canvas/audit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            revision_before: state.lastLoggedRevision,
+            revision_after: canvasRevision,
+            snapshot_before: before,
+            snapshot_after: after,
+            reason: "manual_edit",
+          }),
+        });
+        state.lastSnapshot = after;
+        state.lastLoggedRevision = canvasRevision;
+        setAuditRefreshTick((t) => t + 1);
+      } catch {
+        // Non-fatal: audit log push failure should not break the UI.
+      }
+    }, 600);
+    return () => {
+      if (state.pendingTimer) clearTimeout(state.pendingTimer);
+    };
+  }, [nodes, edges, canvasRevision, snapshotNodesEdges]);
   const setSectionRefreshing = useCallback((sectionKey, isRefreshing) => {
     setSectionRefreshState((current) => ({ ...current, [sectionKey]: isRefreshing }));
   }, []);
@@ -1705,6 +1885,7 @@ export default function App() {
         setSystem(payload.system || {});
         setPipelines(payload.pipelines || []);
         setFileTree(payload.fileTree || null);
+        setWorkspaceFileTree(payload.fileTree || null);
       })
       .catch((error) => {
         if (active) {
@@ -1791,6 +1972,7 @@ export default function App() {
       const next = payload.auditPath || payload.projectPath;
       setAuditPath(next);
       setFileTree(payload.fileTree || null);
+      setWorkspaceFileTree(payload.fileTree || null);
       setExcludedPaths([]);
       setGeneratedClusters([]);
       setClusterStats({ solFiles: 0, clusters: 0, functions: 0, edges: 0 });
@@ -1810,6 +1992,7 @@ export default function App() {
         setAuditPath(next);
       }
       setFileTree(payload.fileTree);
+      setWorkspaceFileTree(payload.fileTree);
       setGeneratedClusters([]);
       setClusterStats({ solFiles: 0, clusters: 0, functions: 0, edges: 0 });
       setClusterOptions(DEFAULT_CLUSTER_OPTIONS);
@@ -2039,6 +2222,7 @@ export default function App() {
       setViewport(pipeline.viewport || { x: 0, y: 0, zoom: 1 });
       const treePayload = await api("/api/project/tree", { method: "POST", body: JSON.stringify({ project_path: nextAudit, excluded_paths: nextExcluded }) });
       setFileTree(treePayload.fileTree);
+      setWorkspaceFileTree(treePayload.fileTree);
       await handleRefreshCatalogs();
       const resolved = treePayload.auditPath || treePayload.projectPath;
       if (resolved) {
@@ -2050,6 +2234,84 @@ export default function App() {
     }
   }, [auditPath, handleRefreshCatalogs, selectedPipeline]);
 
+  // Latest-value ref for ui_context: read on every chat send so we always
+  // submit the freshest view of the canvas / tab / catalogs without
+  // forcing ChatPanel to re-render whenever node/edge state ticks.
+  const uiContextSnapshotRef = useRef({});
+  uiContextSnapshotRef.current = {
+    currentTab: builderTab,
+    auditPath,
+    workspacePath,
+    excludedPaths,
+    docsStatus: {
+      ready: Boolean(docsStatus?.prepared),
+      indexed_files: Number(docsStatus?.md_file_count || 0),
+      chunk_count: Number(docsStatus?.chunk_count || 0),
+      last_indexed: docsStatus?.last_indexed || null,
+    },
+    catalogs: Object.fromEntries(
+      Object.entries(catalogs || {}).map(([key, section]) => [
+        key,
+        {
+          path: section?.path || "",
+          entries: (section?.entries || []).map((entry) => ({
+            name: entry.name || "",
+            path: entry.path || "",
+            kind: entry.kind || "file",
+          })),
+        },
+      ]),
+    ),
+    availableTools: (catalogs?.mcp?.entries || []).map((tool) => ({
+      name: tool.name,
+      description: "",
+      endpoints: [],
+    })),
+    pipelineName,
+    savedPipeline: selectedPipeline,
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      type: node.type || "agent",
+      position: node.position || { x: 0, y: 0 },
+      data: node.data || {},
+      parentId: node.parentId || null,
+    })),
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      sourceHandle: edge.sourceHandle || null,
+      targetHandle: edge.targetHandle || null,
+      type: edge.type || null,
+      data: edge.data || {},
+    })),
+    viewport,
+    selectedNodes: [],
+    selectedFiles: [],
+    canvasRevision,
+    auditMode,
+  };
+  const getUiContext = useCallback(() => uiContextSnapshotRef.current, []);
+
+  const chatPanelVisible = builderTab !== "settings";
+
+  const handleChatPanelWidthChange = useCallback((width) => {
+    const next = Math.min(
+      CHAT_PANEL_WIDTH_MAX,
+      Math.max(CHAT_PANEL_WIDTH_MIN, Math.round(width)),
+    );
+    setChatPanelWidth(next);
+  }, []);
+
+  useLayoutEffect(() => {
+    try {
+      window.localStorage.setItem(CHAT_PANEL_WIDTH_KEY, String(chatPanelWidth));
+    } catch {
+      /* ignore */
+    }
+    document.documentElement.style.setProperty("--chat-panel-width", `${chatPanelWidth}px`);
+  }, [chatPanelWidth]);
+
   return (
     <div className="app-shell">
       <main className="page">
@@ -2058,7 +2320,10 @@ export default function App() {
           <button type="button" role="tab" aria-selected={builderTab === "settings"} className={`builder-tab ${builderTab === "settings" ? "builder-tab--active" : ""}`} onClick={() => setBuilderTab("settings")}>1. Settings</button>
           <button type="button" role="tab" aria-selected={builderTab === "pipeline"} className={`builder-tab ${builderTab === "pipeline" ? "builder-tab--active" : ""}`} onClick={() => setBuilderTab("pipeline")}>2. Pipeline</button>
           <button type="button" role="tab" aria-selected={builderTab === "audit"} className={`builder-tab ${builderTab === "audit" ? "builder-tab--active" : ""}`} onClick={() => setBuilderTab("audit")}>3. Audit</button>
+          <button type="button" role="tab" aria-selected={builderTab === "editor"} className={`builder-tab ${builderTab === "editor" ? "builder-tab--active" : ""}`} onClick={() => setBuilderTab("editor")}>4. Editor</button>
         </div>
+        <div className={`page-body ${chatPanelVisible ? "page-body--with-chat" : ""}`}>
+          <div className="page-body__main">
         {builderTab === "settings" ? (
           <div className="builder-layout" role="tabpanel" aria-label="Settings">
             <aside className="file-column">
@@ -2120,20 +2385,20 @@ export default function App() {
             </section>
           </div>
         ) : null}
-        {builderTab === "pipeline" ? <section className="workspace workspace--flow-tab" role="tabpanel" aria-label="Pipeline"><div className="section-title">Pipeline Builder</div><div className="detail-panel"><div className="block-header block-header--row"><div><div className="block-title">6. Agent Flow Board</div><div className="block-subtitle">Create custom audit pipelines from agent, patterns, memory and code blocks.</div></div><div className="status-text">{status}</div></div><div className="flow-toolbar"><div className="pipeline-controls"><label className="pipeline-controls__field"><span>Pipeline name</span><input value={pipelineName} onChange={(event) => setPipelineName(event.target.value)} /></label><button type="button" onClick={handleSavePipeline}>Save pipeline</button><div className="pipeline-controls__divider" /><label className="pipeline-controls__field"><span>Saved pipelines</span><select value={selectedPipeline} onChange={(event) => setSelectedPipeline(event.target.value)}><option value="">Select pipeline</option>{pipelines.map((pipeline) => <option key={pipeline.path} value={pipeline.name}>{pipeline.name}</option>)}</select></label><button type="button" className="button-secondary" onClick={handleLoadPipeline}>Load pipeline</button></div><div className="agent-picker-panel"><div className="agent-picker-title">Agent Blocks</div><div className="agent-picker-subtitle">Add a block and configure it directly on the canvas.</div><div className="button-row agent-picker-row"><button type="button" onClick={() => handleAddNode("agent")}>Add agent</button><button type="button" onClick={() => handleAddNode("patterns")}>Add patterns</button><button type="button" onClick={() => handleAddNode("memory")}>Add memory</button><button type="button" onClick={() => handleAddNode("code")}>Add code</button></div></div></div><div className="flow-canvas"><ReactFlow nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onMoveEnd={(_, nextViewport) => setViewport(nextViewport)} fitView><MiniMap zoomable pannable style={{ background: "#0d1117", border: "1px solid #30363d" }} /><Controls /><Background color="#21262d" gap={20} /></ReactFlow></div></div></section> : null}
+        {builderTab === "pipeline" ? <section className="workspace workspace--flow-tab" role="tabpanel" aria-label="Pipeline"><div className="section-title">Pipeline Builder</div><div className="detail-panel"><div className="block-header block-header--row"><div><div className="block-title">6. Agent Flow Board</div><div className="block-subtitle">Create custom audit pipelines from agent, patterns, memory and code blocks.</div></div><div className="status-text">{status}</div></div><div className="flow-toolbar"><div className="pipeline-controls"><label className="pipeline-controls__field"><span>Pipeline name</span><input value={pipelineName} onChange={(event) => setPipelineName(event.target.value)} /></label><button type="button" onClick={handleSavePipeline}>Save pipeline</button><div className="pipeline-controls__divider" /><label className="pipeline-controls__field"><span>Saved pipelines</span><select value={selectedPipeline} onChange={(event) => setSelectedPipeline(event.target.value)}><option value="">Select pipeline</option>{pipelines.map((pipeline) => <option key={pipeline.path} value={pipeline.name}>{pipeline.name}</option>)}</select></label><button type="button" className="button-secondary" onClick={handleLoadPipeline}>Load pipeline</button></div><div className="agent-picker-panel"><div className="agent-picker-title">Agent Blocks</div><div className="agent-picker-subtitle">Add a block and configure it directly on the canvas.</div><div className="button-row agent-picker-row"><button type="button" onClick={() => handleAddNode("agent")}>Add agent</button><button type="button" onClick={() => handleAddNode("patterns")}>Add patterns</button><button type="button" onClick={() => handleAddNode("memory")}>Add memory</button><button type="button" onClick={() => handleAddNode("code")}>Add code</button><button type="button" className="button-secondary" onClick={() => setUndoDrawerOpen(true)} title="Reverse recent canvas mutations">Undo…</button><button type="button" className="button-secondary" onClick={() => setAuditDrawerOpen(true)} title="Show canvas audit log">Audit log</button></div></div></div><div className="flow-canvas"><ReactFlow nodes={flowNodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onMoveEnd={(_, nextViewport) => setViewport(nextViewport)} fitView><MiniMap zoomable pannable style={{ background: "#0d1117", border: "1px solid #30363d" }} /><Controls /><Background color="#21262d" gap={20} /></ReactFlow></div></div></section> : null}
         {builderTab === "audit" ? <section className="workspace workspace--flow-tab" role="tabpanel" aria-label="Audit">
-          <div className="audit-tab-actions">
-            {auditRunStatus === "running" ? (
-              <button type="button" className="button-danger" onClick={handleStopAudit}>Stop Audit</button>
-            ) : (
-              <button type="button" onClick={handleStartAudit} disabled={auditRunStatus === "starting"}>
-                {auditRunStatus === "starting" ? "Starting..." : "Start Audit"}
-              </button>
-            )}
-            {auditRunStatus ? <span className={`audit-run-badge audit-run-badge--${auditRunStatus}`}>{auditRunStatus}</span> : null}
-          </div>
           <div className="section-title">Audit process</div>
           <div className="detail-panel">
+            <div className="audit-tab-actions">
+              {auditRunStatus === "running" ? (
+                <button type="button" className="button-danger" onClick={handleStopAudit}>Stop Audit</button>
+              ) : (
+                <button type="button" onClick={handleStartAudit} disabled={auditRunStatus === "starting"}>
+                  {auditRunStatus === "starting" ? "Starting..." : "Start Audit"}
+                </button>
+              )}
+              {auditRunStatus ? <span className={`audit-run-badge audit-run-badge--${auditRunStatus}`}>{auditRunStatus}</span> : null}
+            </div>
             <div className="block-header block-header--row">
               <div><div className="block-title">7. Audit process</div><div className="block-subtitle">Read-only view of the current Pipeline canvas with live execution logs.</div></div>
               <div className="status-text">{status}</div>
@@ -2166,7 +2431,34 @@ export default function App() {
             </div>
           </div>
         </section> : null}
+        {builderTab === "editor" ? <MonacoPane workspaceTree={workspaceFileTree} workspacePath={workspacePath} pendingOpen={pendingEditorOpen} /> : null}
+          </div>
+          <ChatPanel
+            visible={chatPanelVisible}
+            uiContextRef={{ current: getUiContext }}
+            providers={providers}
+            onApplyCanvasAction={canvasDispatcher}
+            bumpCanvasRevision={bumpCanvasRevision}
+            onOpenInEditor={handleOpenInEditor}
+            workspacePaths={workspacePathSet}
+            currentTab={builderTab}
+            chatPanelWidth={chatPanelWidth}
+            onChatPanelWidthChange={handleChatPanelWidthChange}
+          />
+        </div>
       </main>
+      <AuditLogDrawer
+        open={auditDrawerOpen}
+        onClose={() => setAuditDrawerOpen(false)}
+        refreshTick={auditRefreshTick}
+      />
+      <CanvasUndoDrawer
+        open={undoDrawerOpen}
+        onClose={() => setUndoDrawerOpen(false)}
+        onApplyAction={undoCanvasDispatcher}
+        refreshTick={auditRefreshTick}
+        onAfterUndo={() => setAuditRefreshTick((t) => t + 1)}
+      />
     </div>
   );
 }

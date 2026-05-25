@@ -17,6 +17,7 @@ It helps you set up audit pipelines with AI agents, pattern checks, memory, Pyth
   - [Table of Contents](#table-of-contents)
   - [What Is VulnFlow](#what-is-vulnflow)
   - [Why VulnFlow](#why-vulnflow)
+  - [May 2026 Update](#may-2026-update)
   - [Screenshots](#screenshots)
   - [Quick Start](#quick-start)
   - [How to Set Up a Project for Audit](#how-to-set-up-a-project-for-audit)
@@ -83,6 +84,73 @@ It is useful when you want a repeatable audit process instead of running every s
 
 ---
 
+## May 2026 Update
+
+This release adds an in-app **code editor** and a persistent **AI chat panel** so you can inspect contracts, ask questions, and change pipelines without leaving the dashboard.
+
+### Built-in Editor (tab 4)
+
+- Browse and open workspace files from a file tree (skills, pipelines, audit targets, config, and more).
+- Edit code in a **Monaco** editor with VS Code Dark Plus theme, syntax highlighting for Solidity and other common languages, and a minimap.
+- **Save**, **Reload**, and unsaved-change warnings keep edits safe inside the workspace boundary.
+- Click `path:line` citations in chat answers to jump straight to the matching file and line in the editor.
+
+### AI Chat panel
+
+The chat panel stays open on the **Pipeline**, **Audit**, and **Editor** tabs (hidden on Settings). It streams answers from models configured in `conf.yaml` (OpenRouter, LM Studio, Ollama, and others).
+
+**Conversations**
+
+- SQLite-backed threads with rename, delete, search, and Markdown export.
+- Pin threads to a tab (pipeline, audit, editor) or keep them available everywhere.
+- Resizable panel width; model choice is remembered across reloads.
+
+**Agent capabilities**
+
+Each message sends the current **UI context** to the backend (active tab, pipeline nodes and edges, catalogs, docs index status, audit path, and more). The agent uses that snapshot plus workspace tools to stay grounded in your project.
+
+| Area | What the agent can do |
+|------|------------------------|
+| **Code and docs** | Read workspace files, list directories, search the `audit_docs/` RAG index |
+| **Resources** | Inspect skills, MCP configs, patterns, and other catalogs discovered in the workspace |
+| **Visualizations** | Plan and render interactive HTML/SVG widgets in a sandboxed iframe |
+| **Pipeline** | On the **Pipeline** tab only — create, edit, and delete canvas nodes and edges |
+| **External APIs** | Call REST tools from `conf.yaml` (for example HornetMCP and Solodit) |
+| **Attachments** | Accept images and PDFs from the composer when using a vision-capable model |
+
+On **Audit**, **Editor**, and other non-pipeline tabs the chat runs in **read-only** mode: the agent can explain the canvas and codebase but cannot mutate the pipeline.
+
+**Response format**
+
+Assistant replies are streamed as **envelope parts** and rendered progressively in the chat:
+
+| Part | What you see |
+|------|----------------|
+| **Text** | Markdown answers with syntax-highlighted code blocks and clickable `path:line` citations |
+| **Plan** | A plan card before visual work (approach, technology, key elements) |
+| **Tool status** | Live status for each tool call (read file, search docs, external API, and so on) |
+| **Widget** | Sandboxed iframe with interactive HTML/SVG; widgets can send follow-up prompts back to the chat |
+| **Canvas action** | Badge showing whether a pipeline mutation was applied, rejected, or skipped |
+| **Error** | Tool or agent errors surfaced inline without breaking the rest of the turn |
+
+Visual responses follow a fixed flow: acknowledge → **plan** → **widget** → short narration.
+
+**Typical scenarios**
+
+1. **Pipeline tab** — *“Add a verification agent after the audit step.”* The agent updates the canvas in real time via streamed canvas actions.
+2. **Editor tab** — *“Find reentrancy issues in `Contract.sol`.”* The agent reads the file, answers with `Contract.sol:142`-style citations; clicking a citation opens that line in the editor.
+3. **Any tab** — *“Show a call-flow diagram for `harvest()`.”* The agent reads relevant `.sol` files, calls `plan_visualization`, then renders a swimlane diagram in a widget (see screenshots below).
+4. **Research** — *“Find similar vulnerabilities to this pattern.”* The agent queries HornetMCP or Solodit through your configured external tools and summarizes the matches.
+
+**Operator UX**
+
+- Live SSE streaming with Stop, queued follow-up prompts, and a context pill showing token usage and history compaction.
+- Canvas **audit log** and **undo** for both manual edits and agent-driven mutations.
+
+See the new screenshots below (`screen_6`–`screen_8`) for the editor, chat tool flow, and an example call-flow diagram generated during an audit session.
+
+---
+
 ## Screenshots
 
 <p align="center">
@@ -105,54 +173,107 @@ It is useful when you want a repeatable audit process instead of running every s
   <img src="docs/screen_5.PNG" alt="VulnFlow screen 5" width="100%">
 </p>
 
+<p align="center">
+  <img src="docs/screen_6.PNG" alt="VulnFlow Editor tab and AI chat with call-flow visualization" width="100%">
+</p>
+
+<p align="center">
+  <em>May 2026 — Editor tab with workspace file tree, Monaco editor, and AI chat showing an interactive call-flow diagram.</em>
+</p>
+
+<p align="center">
+  <img src="docs/screen_7.png" alt="VulnFlow AI chat widget: harvest call-flow diagram" width="100%">
+</p>
+
+<p align="center">
+  <em>May 2026 — AI-generated swimlane diagram tracing a Solidity function across contracts, with vulnerability notes.</em>
+</p>
+
+<p align="center">
+  <img src="docs/screen_8.PNG" alt="VulnFlow AI chat panel with tool status and plan card" width="100%">
+</p>
+
+<p align="center">
+  <em>May 2026 — AI chat using workspace tools (read files, list directories, plan visualization) before building a diagram.</em>
+</p>
+
 ---
 
 ## Quick Start
 
-1. Prepare the Python environment from the repository root:
+Run all commands from the **repository root** (the folder that contains `vulnflow.py`).
 
-   ```bash
-   python vulnflow.py prepare
-   ```
+### One-time setup
 
-   On Windows you can also use `vulnflow.cmd` or `vulnflow.ps1`.
+1. **Create the Python environment**
 
-2. Activate the virtual environment:
+   Pick the command that matches your terminal:
 
-   - Windows PowerShell: `.venv\Scripts\Activate.ps1`
-   - Linux/macOS: `source .venv/bin/activate`
+   | Terminal | Command |
+   |----------|---------|
+   | **Linux / macOS (bash)** | `./vulnflow prepare` |
+   | **Windows PowerShell** | `.\vulnflow.ps1 prepare` |
+   | **Windows Command Prompt** | `vulnflow.cmd prepare` |
+   | **Any (direct Python)** | `python vulnflow.py prepare` |
 
-3. Build the UI if needed:
+   On Linux or macOS, run `chmod +x vulnflow` once if `./vulnflow` is not executable yet.
+
+   The `prepare` step creates `.venv/` and installs dependencies from `requirements.txt`.
+
+2. **Build the UI** (first time, or after UI changes):
 
    ```bash
    cd dashboard/ui
    npm install
    npm run build
+   cd ../..
    ```
 
-4. Configure `conf.yaml` with at least one enabled model provider.
+3. **Configure models** — edit `conf.yaml` and enable at least one provider under `models`.
 
-5. Start VulnFlow:
+### Start the builder
 
-  ```powershell
-  vulnflow start
-  ```
-  
-  or
+The launcher scripts (`./vulnflow`, `vulnflow.cmd`, `vulnflow.ps1`) call `vulnflow.py` with the project `.venv` automatically. **You do not need to activate the virtual environment first** when you use them.
 
-   ```bash
-   ./vulnflow.py start
-   ```
+Pick **one** start command for your terminal:
 
-6. Open the local builder URL shown in the terminal.
+| Terminal | Command |
+|----------|---------|
+| **Linux / macOS (bash)** | `./vulnflow start` |
+| **Windows PowerShell** | `.\vulnflow.ps1 start` |
+| **Windows Command Prompt** | `vulnflow.cmd start` |
 
-By default, VulnFlow starts on `127.0.0.1` and tries port `7337` first.
+**Alternative — activate `.venv` and use Python directly**
+
+If you prefer the classic workflow, activate the environment first, then run `start`:
+
+| Terminal | Activate | Start |
+|----------|----------|-------|
+| **Windows PowerShell** | `.venv\Scripts\Activate.ps1` | `python vulnflow.py start` |
+| **Linux / macOS (bash)** | `source .venv/bin/activate` | `python vulnflow.py start` |
+| **Windows Command Prompt** | `.venv\Scripts\activate.bat` | `python vulnflow.py start` |
+
+All of the commands above do the same thing: launch the local dashboard and print a URL such as `http://127.0.0.1:7337`. Open that address in your browser if it does not open automatically.
+
+Press `Ctrl+C` in the terminal to stop the server.
+
+### Start options
+
+By default, VulnFlow binds to `127.0.0.1` and tries port `7337` first. Append flags to any start command above, for example:
+
+```bash
+./vulnflow start --port 8080 --no-open
+```
+
+```powershell
+.\vulnflow.ps1 start --port 8080 --no-open
+```
 
 | Flag | Meaning |
 |------|---------|
-| `--port <n>` | Preferred port |
-| `--no-open` | Do not open a browser tab |
-| `--keep-db` | Keep `vulnflow.db` on startup |
+| `--port <n>` | Preferred port (scans upward if busy) |
+| `--no-open` | Do not open a browser tab automatically |
+| `--keep-db` | Keep `vulnflow.db` (vector index) on startup |
 
 ---
 

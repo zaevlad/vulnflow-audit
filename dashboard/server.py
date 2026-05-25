@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from dashboard.chat import register_chat_routes
 from dashboard.cluster_logic import generate_clusters_for_project
 from dashboard.docs_rag import get_docs_status, prepare_docs_index
 from dashboard.pipeline.agent_runner import estimate_agent_request_costs
@@ -103,6 +104,15 @@ class PipelineRunRequest(BaseModel):
 
 class PipelineEstimateRequest(BaseModel):
     nodes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EditorOpenRequest(BaseModel):
+    path: str
+
+
+class EditorSaveRequest(BaseModel):
+    path: str
+    content: str
 
 
 _active_runs: dict[str, PipelineRun] = {}
@@ -348,6 +358,53 @@ def pick_project_folder(initial_dir: str | None = None) -> str | None:
     finally:
         root.destroy()
     return selected or None
+
+
+_EXT_TO_LANGUAGE: dict[str, str] = {
+    ".sol": "sol",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".py": "python",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".json": "json",
+    ".md": "markdown",
+    ".txt": "plaintext",
+    ".toml": "ini",
+    ".cfg": "ini",
+    ".ini": "ini",
+    ".html": "html",
+    ".css": "css",
+    ".sh": "shell",
+    ".bash": "shell",
+    ".rs": "rust",
+    ".go": "go",
+    ".java": "java",
+    ".c": "c",
+    ".cpp": "cpp",
+    ".h": "cpp",
+    ".hpp": "cpp",
+    ".cs": "csharp",
+    ".rb": "ruby",
+    ".php": "php",
+}
+
+_TEXT_EXTENSIONS: frozenset[str] = frozenset(_EXT_TO_LANGUAGE.keys())
+
+
+def _validate_editor_path(path: str) -> Path:
+    try:
+        resolved = Path(path).expanduser().resolve()
+        resolved.relative_to(WORKSPACE_ROOT)
+    except (ValueError, Exception):
+        raise HTTPException(status_code=400, detail="Path is outside workspace.")
+    return resolved
+
+
+def _detect_language(path: Path) -> str:
+    return _EXT_TO_LANGUAGE.get(path.suffix.lower(), "plaintext")
 
 
 def create_app() -> FastAPI:
@@ -599,6 +656,69 @@ def create_app() -> FastAPI:
             subs = _ws_subscribers.get(run_id, [])
             if websocket in subs:
                 subs.remove(websocket)
+
+    # ------------------------------------------------------------------
+    # Editor endpoints
+    # ------------------------------------------------------------------
+
+    @app.post("/api/editor/open")
+    def api_editor_open(payload: EditorOpenRequest) -> dict[str, Any]:
+        file_path = _validate_editor_path(payload.path)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found.")
+        if not file_path.is_file():
+            raise HTTPException(status_code=400, detail="Path is not a file.")
+        if file_path.suffix.lower() not in _TEXT_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_path.suffix or '(no extension)'}")
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"File is not readable: {exc}") from exc
+        return {
+            "ok": True,
+            "path": str(file_path),
+            "rel_path": str(file_path.relative_to(WORKSPACE_ROOT)),
+            "content": content,
+            "language": _detect_language(file_path),
+        }
+
+    @app.post("/api/editor/save")
+    def api_editor_save(payload: EditorSaveRequest) -> dict[str, Any]:
+        file_path = _validate_editor_path(payload.path)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found.")
+        if not file_path.is_file():
+            raise HTTPException(status_code=400, detail="Path is not a file.")
+        if file_path.suffix.lower() not in _TEXT_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_path.suffix or '(no extension)'}")
+        try:
+            file_path.write_text(payload.content, encoding="utf-8")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Cannot write file: {exc}") from exc
+        return {"ok": True, "path": str(file_path), "size": file_path.stat().st_size}
+
+    @app.post("/api/editor/reload")
+    def api_editor_reload(payload: EditorOpenRequest) -> dict[str, Any]:
+        file_path = _validate_editor_path(payload.path)
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found.")
+        if not file_path.is_file():
+            raise HTTPException(status_code=400, detail="Path is not a file.")
+        if file_path.suffix.lower() not in _TEXT_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_path.suffix or '(no extension)'}")
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"File is not readable: {exc}") from exc
+        return {
+            "ok": True,
+            "path": str(file_path),
+            "rel_path": str(file_path.relative_to(WORKSPACE_ROOT)),
+            "content": content,
+            "language": _detect_language(file_path),
+        }
+
+    register_chat_routes(app, workspace_root=WORKSPACE_ROOT, conf_path=CONF_PATH)
 
     return app
 

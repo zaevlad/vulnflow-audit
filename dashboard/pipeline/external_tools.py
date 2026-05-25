@@ -80,6 +80,19 @@ def load_external_tools(conf_path: Path) -> list[dict[str, Any]]:
                     }
                 )
 
+        rate_limit_raw = item.get("rate_limit")
+        rate_limit: dict[str, Any] | None = None
+        if isinstance(rate_limit_raw, dict):
+            cleaned: dict[str, Any] = {}
+            for key in ("per_minute", "per_second", "burst"):
+                if key in rate_limit_raw:
+                    try:
+                        cleaned[key] = float(rate_limit_raw[key])
+                    except (TypeError, ValueError):
+                        continue
+            if cleaned:
+                rate_limit = cleaned
+
         tools.append(
             {
                 "name": tool_name,
@@ -89,6 +102,7 @@ def load_external_tools(conf_path: Path) -> list[dict[str, Any]]:
                 "api_key_header": str(item.get("api_key_header", "")).strip(),
                 "description": str(item.get("description", "")).strip(),
                 "endpoints": endpoints,
+                "rate_limit": rate_limit,
             }
         )
     return tools

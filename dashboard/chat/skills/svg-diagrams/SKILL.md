@@ -1,0 +1,251 @@
+---
+name: "SVG Diagram Generation"
+description: "Generating rich inline SVG diagrams to visually explain systems, processes, architectures, and abstract concepts."
+allowed-tools: []
+---
+
+# SVG Diagram Generation Skill
+
+You can generate rich, inline SVG diagrams to visually explain concepts. Use this skill whenever a visual would help the user understand a system, process, architecture, or mechanism better than text alone.
+
+---
+
+## When to Use
+
+- Explaining how something works (load paths, circuits, pipelines, algorithms)
+- Showing architecture or structure (system diagrams, component layouts)
+- Illustrating processes or flows (flowcharts, data flow, decision trees)
+- Building intuition for abstract concepts (attention mechanisms, gradient descent, recursion)
+
+## SVG Setup
+
+Always use this template:
+
+```svg
+<svg width="100%" viewBox="0 0 680 H" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <!-- Content here -->
+</svg>
+```
+
+- **Width is always 680px** via viewBox. Set `width="100%"` so it scales responsively.
+- **H (height)** = bottom-most element's y + height + 40px padding. Don't guess — compute it.
+- **Safe content area**: x=40 to x=640, y=40 to y=(H-40).
+- **No wrapping divs**, no `<html>`, `<head>`, `<body>`, or DOCTYPE.
+- **Background is transparent** — the host provides the background.
+
+---
+
+## Core Design Rules
+
+### Typography
+- **Two sizes only**: 14px for titles/labels, 12px for subtitles/descriptions.
+- **Two weights only**: 400 (regular), 500 (medium/bold). Never use 600 or 700.
+- **Font**: Use `font-family="system-ui, -apple-system, sans-serif"` or inherit from host.
+- **Always set** `text-anchor="middle"` and `dominant-baseline="central"` for centered text in boxes.
+- **Sentence case always**. Never Title Case or ALL CAPS.
+
+### Text Width Estimation
+At 14px, each character ~ 8px wide. At 12px, each character ~ 7px wide.
+- "Load Balancer" (13 chars) at 14px ~ 104px -> needs rect ~ 140px wide (with padding).
+- Always compute: `rect_width = max(title_chars x 8, subtitle_chars x 7) + 48px padding`.
+
+### Colors (Light/Dark Mode Safe)
+Use these semantic color sets that work in both modes:
+
+```
+Teal:    fill="#E1F5EE" stroke="#0F6E56" text="#085041"  (dark: fill="#085041" stroke="#5DCAA5" text="#9FE1CB")
+Purple:  fill="#EEEDFE" stroke="#534AB7" text="#3C3489"  (dark: fill="#3C3489" stroke="#AFA9EC" text="#CECBF6")
+Coral:   fill="#FAECE7" stroke="#993C1D" text="#712B13"  (dark: fill="#712B13" stroke="#F0997B" text="#F5C4B3")
+Amber:   fill="#FAEEDA" stroke="#854F0B" text="#633806"  (dark: fill="#633806" stroke="#EF9F27" text="#FAC775")
+Blue:    fill="#E6F1FB" stroke="#185FA5" text="#0C447C"  (dark: fill="#0C447C" stroke="#85B7EB" text="#B5D4F4")
+Gray:    fill="#F1EFE8" stroke="#5F5E5A" text="#444441"  (dark: fill="#444441" stroke="#B4B2A9" text="#D3D1C7")
+Red:     fill="#FCEBEB" stroke="#A32D2D" text="#791F1F"  (dark: fill="#791F1F" stroke="#F09595" text="#F7C1C1")
+Green:   fill="#EAF3DE" stroke="#3B6D11" text="#27500A"  (dark: fill="#27500A" stroke="#97C459" text="#C0DD97")
+Pink:    fill="#FBEAF0" stroke="#993556" text="#72243E"  (dark: fill="#72243E" stroke="#ED93B1" text="#F4C0D1")
+```
+
+**Color meaning, not sequence**: Don't rainbow-cycle. Use 2-3 colors per diagram. Map colors to categories or physical properties (warm = heat/energy, cool = calm/cold, gray = structural/neutral).
+
+If you're rendering inside a system that supports CSS variables, prefer:
+- `var(--color-text-primary)` for primary text
+- `var(--color-text-secondary)` for muted text
+- `var(--color-border-tertiary)` for light borders
+
+### Shapes & Layout
+- **Stroke width**: 0.5px for borders, 1.5px for arrows/connectors.
+- **Corner radius**: `rx="4"` for subtle rounding, `rx="8"` for emphasized. `rx="20"` for large containers.
+- **Spacing**: 60px minimum between boxes, 24px padding inside boxes, 12px text-to-edge clearance.
+- **Single-line box**: 44px tall. **Two-line box**: 56px tall.
+- **Max 4-5 nodes per row** at 680px width. If more, split into multiple diagrams.
+- **All connectors need `fill="none"`** — SVG defaults fill to black, which turns paths into black blobs.
+
+---
+
+## Component Patterns
+
+### Single-Line Node
+```svg
+<g>
+  <rect x="100" y="20" width="180" height="44" rx="8"
+        fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+  <text x="190" y="42" text-anchor="middle" dominant-baseline="central"
+        font-size="14" font-weight="500" fill="#3C3489">Node title</text>
+</g>
+```
+
+### Two-Line Node
+```svg
+<g>
+  <rect x="100" y="20" width="200" height="56" rx="8"
+        fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+  <text x="200" y="38" text-anchor="middle" dominant-baseline="central"
+        font-size="14" font-weight="500" fill="#0C447C">Title</text>
+  <text x="200" y="56" text-anchor="middle" dominant-baseline="central"
+        font-size="12" fill="#185FA5">Short subtitle</text>
+</g>
+```
+
+### Arrow Connector
+```svg
+<line x1="200" y1="76" x2="200" y2="120"
+      stroke="#534AB7" stroke-width="1.5" marker-end="url(#arrow)"/>
+```
+
+### Dashed Flow Indicator
+```svg
+<line x1="200" y1="76" x2="200" y2="120"
+      stroke="#534AB7" stroke-width="1.5" stroke-dasharray="4 3"/>
+```
+
+### Leader Line with Label (for annotations)
+```svg
+<line x1="440" y1="100" x2="500" y2="130"
+      stroke="currentColor" stroke-width="0.5" stroke-dasharray="4 4" opacity="0.5"/>
+<circle cx="440" cy="100" r="2" fill="currentColor" opacity="0.5"/>
+<text x="506" y="134" font-size="12" fill="currentColor" opacity="0.7">Annotation text</text>
+```
+
+### Large Container (for structural diagrams)
+```svg
+<rect x="80" y="40" width="520" height="300" rx="20"
+      fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text x="340" y="68" text-anchor="middle"
+      font-size="14" font-weight="500" fill="#085041">Container name</text>
+```
+
+---
+
+## Diagram Types & When to Use Each
+
+### 1. Flowchart
+**When**: Sequential processes, decision trees, pipelines.
+**Layout**: Top-to-bottom or left-to-right. Single direction only.
+**Rules**:
+- Arrows must never cross unrelated boxes. Route around with L-bends if needed.
+- Keep all same-type boxes the same height.
+- Max 4-5 nodes per diagram. Break complex flows into multiple diagrams.
+
+### 2. Structural Diagram
+**When**: Containment matters — things inside other things (architecture, org charts, system components).
+**Layout**: Nested rectangles. Outer = container, inner = regions.
+**Rules**:
+- Max 2-3 nesting levels.
+- 20px minimum padding inside every container.
+- Use different color ramps for parent vs child to show hierarchy.
+
+### 3. Illustrative Diagram
+**When**: Building intuition. "How does X actually work?"
+**Layout**: Freeform — follows the subject's natural geometry.
+**Rules**:
+- Shapes can be freeform (paths, ellipses, polygons), not just rects.
+- Color encodes intensity, not category (warm = active, cool = dormant).
+- Overlap shapes for depth, but never let strokes cross text.
+- Labels go in margins with leader lines pointing to the relevant part.
+
+---
+
+## Critical Checks Before Finalizing
+
+1. **ViewBox height**: Find your lowest element (max y + height). Set H = that + 40px.
+2. **No content past x=640 or below y=(H-40)**.
+3. **Text fits in boxes**: `(char_count x 8) + 48 < rect_width` for 14px text.
+4. **No arrows through boxes**: Trace every line's path — if it crosses a rect, reroute.
+5. **All `<path>` connectors have `fill="none"`**.
+6. **All text has appropriate fill color** — never rely on inheritance (SVG defaults to black).
+7. **Colors work in dark mode**: If using hardcoded colors, provide both light and dark variants. If using CSS variables, you're fine.
+
+---
+
+## Multi-Diagram Approach
+
+For complex topics, use multiple smaller SVGs instead of one dense one:
+- Each SVG should have 3-5 nodes max.
+- Write explanatory text between diagrams.
+- First diagram = overview, subsequent = zoom into subsections.
+- Never promise diagrams you don't deliver.
+
+---
+
+## Example: Simple 3-Step Flow
+
+```svg
+<svg width="100%" viewBox="0 0 680 260" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5"
+            markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <!-- Step 1 -->
+  <rect x="230" y="20" width="220" height="56" rx="8"
+        fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+  <text x="340" y="38" text-anchor="middle" dominant-baseline="central"
+        font-size="14" font-weight="500" fill="#085041">User request</text>
+  <text x="340" y="56" text-anchor="middle" dominant-baseline="central"
+        font-size="12" fill="#0F6E56">HTTP POST /api/data</text>
+
+  <!-- Arrow 1->2 -->
+  <line x1="340" y1="76" x2="340" y2="100" stroke="#534AB7"
+        stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Step 2 -->
+  <rect x="230" y="106" width="220" height="56" rx="8"
+        fill="#EEEDFE" stroke="#534AB7" stroke-width="0.5"/>
+  <text x="340" y="124" text-anchor="middle" dominant-baseline="central"
+        font-size="14" font-weight="500" fill="#3C3489">Server processing</text>
+  <text x="340" y="142" text-anchor="middle" dominant-baseline="central"
+        font-size="12" fill="#534AB7">Validate and transform</text>
+
+  <!-- Arrow 2->3 -->
+  <line x1="340" y1="162" x2="340" y2="186" stroke="#854F0B"
+        stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Step 3 -->
+  <rect x="230" y="192" width="220" height="56" rx="8"
+        fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+  <text x="340" y="210" text-anchor="middle" dominant-baseline="central"
+        font-size="14" font-weight="500" fill="#633806">Database write</text>
+  <text x="340" y="228" text-anchor="middle" dominant-baseline="central"
+        font-size="12" fill="#854F0B">INSERT into table</text>
+</svg>
+```
+
+---
+
+## Tips for Great Diagrams
+
+- **Less is more**: A clean 4-node diagram teaches better than a cramped 12-node one.
+- **Color = meaning**: Warm colors for active/hot/important, cool for passive/cold/secondary, gray for structural.
+- **Streaming effect**: Since SVGs render top-to-bottom as tokens arrive, structure your elements top-down for a natural build-up animation.
+- **Annotations on the side**: Put explanatory labels in the right margin (x > 560) with leader lines pointing to the relevant element.
+- **Consistent heights**: All boxes of the same type should be the same height.
+- **Whitespace is your friend**: Don't fill every pixel. Breathing room makes diagrams readable.

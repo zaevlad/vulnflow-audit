@@ -19,13 +19,13 @@ models:
 #      - claude-3-5-haiku
   openrouter:
     enabled: true
-    api_key: ""
+    api_key: "sk-or-v1-"
     # api_key_env: OPENROUTER_API_KEY
     # base_url: https://openrouter.ai/api/v1
     # base_url_env: OPENROUTER_BASE_URL
     supports_response_format: true
     models:
-      - openai/gpt-oss-120b
+      - anthropic/claude-sonnet-4.6
 #  ollama:
 #    enabled: true
 #    models:
@@ -35,7 +35,7 @@ models:
     enabled: true
     supports_response_format: false
     models:
-      - gemma-4-26B-A4B-it-GGUF
+      - Qwen3.6-27B-GGUF
 #  llama_cpp:
 #    enabled: true
 #    models:
@@ -59,6 +59,9 @@ tools:
     auth_type: api_key_header
     api_key_header: X-API-Key
     api_key: ""
+    rate_limit:
+      per_minute: 10
+      burst: 3
     endpoints:
       - name: search
         path: vulnerabilities/search
@@ -88,6 +91,9 @@ tools:
     auth_type: api_key_header
     api_key_header: X-Cyfrin-API-Key
     api_key: ""
+    rate_limit:
+      per_minute: 20
+      burst: 5
     endpoints:
       - name: findings
         path: findings
@@ -113,3 +119,19 @@ tools:
             required: false
             description: >-
               Filter object as in the API spec; can be left empty {} for paginated results.
+
+# --------------------------------------------------------------------------------------
+
+# Chat agent — context-window management.
+# Когда суммарный input превышает max_input_tokens, ранние user/assistant сообщения
+# заменяются одним system-сообщением с саммари; последние keep_last_messages
+# сообщений сохраняются как есть. summary_model — дешёвая модель для свёртки.
+
+chat:
+  context:
+    enabled: true
+    max_input_tokens: 120000
+    keep_last_messages: 8
+    summary_model:
+      provider: openrouter
+      model: openai/gpt-oss-120b
